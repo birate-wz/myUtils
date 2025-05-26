@@ -1,0 +1,5 @@
+if(EXISTS "/home/zhw/zhen/myUtils/ThreadPool/build/threadPoolTest[1]_tests.cmake")
+  include("/home/zhw/zhen/myUtils/ThreadPool/build/threadPoolTest[1]_tests.cmake")
+else()
+  add_test(threadPoolTest_NOT_BUILT threadPoolTest_NOT_BUILT)
+endif()

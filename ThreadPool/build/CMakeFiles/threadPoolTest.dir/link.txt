@@ -1,0 +1,1 @@
+/usr/bin/c++  -Wall -Wextra -Werror CMakeFiles/threadPoolTest.dir/test.cpp.o -o bin/threadPoolTest  lib/libthreadPool.a -lgtest -lgtest_main 
