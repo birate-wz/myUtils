@@ -9,9 +9,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 
 #设置构建选项
-option(BUILD_THREADPOOL "Enable thread pool library" OFF)
-option(BUILD_LOGGER "Enable logger library " OFF)
-option(BUILD_MEMORYPOOL "Enable memory pool library" OFF)
+option(BUILD_THREADPOOL "Enable thread pool library" ON)
+option(BUILD_LOGGER "Enable logger library " ON)
+option(BUILD_MEMORYPOOL "Enable memory pool library" ON)
 option(BUILD_COROUTINE "Enable coroutine library" OFF)
 
 #设置输出目录

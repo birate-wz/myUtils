@@ -16,7 +16,7 @@ void ThreadPool::Start()
 {
     mStart = true;
     for (size_t i = 0; i < mNumThreads; ++i) {
-        mWorks.emplace_back([this] {
+        mWorks.emplace_back([&] {
             workerThread();
         });
     }
