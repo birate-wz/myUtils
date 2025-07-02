@@ -84,7 +84,9 @@
         "stack": "cpp",
         "__tree": "cpp",
         "source_location": "cpp",
-        "__bit_reference": "cpp"
+        "__bit_reference": "cpp",
+        "__locale": "cpp",
+        "__config": "cpp"
     },
     "Codegeex.RepoIndex": true,
     "C_Cpp.default.cppStandard": "gnu++20",

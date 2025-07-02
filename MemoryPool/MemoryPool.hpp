@@ -7,6 +7,9 @@
 #include <cstddef> 
 #include <array>
 
+constexpr size_t align_of(size_t size, size_t allignment) {
+    return (size + allignment -1) & ~(allignment - 1);
+}
 // 无锁栈实现
 template <typename T>
 class LockFreeStack {
@@ -97,7 +100,7 @@ private:
             count = 0;
         }
     };
-    static inline ThreadCache local_cache;
+    static inline thread_local ThreadCache local_cache;
 
     static inline constexpr size_t BLOCK_PER_CHUNK = N / sizeof(Block);
 
@@ -367,7 +370,8 @@ private:
     struct FreeBlock {
         size_t size;
         std::atomic<FreeBlock*> next;
-        FreeBlock(size_t s):size(s), next(nullptr) {}
+        bool free_flag;
+        FreeBlock(size_t s):size(s), next(nullptr), free_flag(false) {}
 
         void* data() { // 指向data 数据
             return reinterpret_cast<std::byte*>(this) + sizeof(FreeBlock);
@@ -380,17 +384,25 @@ private:
 
     struct ChunkClass {
         std::atomic<FreeBlock*> free_list;
-        size_t block_size;  // 每个block size
         std::atomic<size_t> allocated_count;
         std::atomic<size_t> deallocated_count;
 
+        size_t block_size;  // 每个block size
+        size_t total_block_size; // 一个block + data的大小
+        size_t block_count; // 每个chunk的block数量
+
         ChunkClass() = default;
-        ChunkClass(size_t s):free_list(nullptr), block_size(s) {}
+        explicit ChunkClass(size_t size):
+            free_list(nullptr),
+            block_size(size),
+            total_block_size(align_of(sizeof(FreeBlock) + size, ALIGNMENT)),
+            block_count(CHUNK_SIZE / total_block_size)
+            {}
     };
 
     struct MultiSizeThreadCache {
         struct ClassCache {
-            FreeBlock* blocks[16]; // 每个大小类缓存块
+            FreeBlock* blocks[32]; // 每个大小类缓存块
             int count;  // 当前缓存的数量
         };
         ClassCache caches[SIZE_CALSSES.size()];
@@ -420,7 +432,6 @@ private:
                 } while (!chunk_class.free_list.compare_exchange_weak(old_head, cache_head, 
                                                                     std::memory_order_release, 
                                                                     std::memory_order_relaxed));
-                
                 class_cache.count = 0;
             }
         }
@@ -450,6 +461,11 @@ public:
     void deallocate(void* ptr, size_t size);
 
     void print_stats() const;
+
+    static void reset_global_state() {
+        MultiSizeThreadCache empty_cache{};
+        thread_cache = empty_cache;
+    }
 };
 
 class MemoryPoolAllocater {
@@ -484,5 +500,9 @@ public:
 
     void print_stats() const {
         pool.print_stats();
+    }
+
+    void reset_global_state() {
+        LockFreeMultiSizePool::reset_global_state();
     }
 };

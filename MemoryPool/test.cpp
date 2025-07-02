@@ -98,14 +98,14 @@ TEST(MemoryPoolTest, multisizePool) {
     MemoryPoolAllocater allocator;
 
     std::vector<std::pair<void*, size_t>> allocate;
-    for (size_t size: {8, 64, 526, 3000, 5000}) {
+    for (size_t size: {8, 63, 64, 526, 3000, 5000}) {
         void* ptr = allocator.allocate(size);
         if (ptr) {
             std::memset(ptr, static_cast<int>(size), size);
             allocate.emplace_back(ptr, size);   
-            LOG_INFO("allocate memory of size:{} at{}", size, ptr);   
+           // LOG_INFO("allocate memory of size:{} at{}", size, ptr);   
         } else {
-            LOG_ERROR("Failed to allocate memory of size:{}", size);
+            //LOG_ERROR("Failed to allocate memory of size:{}", size);
         }
 
     }
@@ -113,17 +113,17 @@ TEST(MemoryPoolTest, multisizePool) {
     auto* ptr1 = allocator.create<TestObject>(1578, "ptr1");
     auto* ptr2 = allocator.create<std::string>("ptr2");
 
-    LOG_INFO("ptr1 value:{}, name:{}", ptr1->getData(), ptr1->getName());
-    LOG_INFO("ptr2 value:{}", ptr2->c_str());
+   // LOG_INFO("ptr1 value:{}, name:{}", ptr1->getData(), ptr1->getName());
+    //LOG_INFO("ptr2 value:{}", ptr2->c_str());
 
-    allocator.print_stats();
+   // allocator.print_stats();
     for (auto& [ptr, size] : allocate) {
         allocator.deallocate(ptr, size);
     }
     allocator.destroy(ptr1);
     allocator.destroy(ptr2);
 
-    allocator.print_stats();
+    //allocator.print_stats();
 }
 
 TEST(MemoryPoolTest, Performance) {
@@ -168,13 +168,14 @@ TEST(MemoryPoolTest, Performance) {
      // 测试非固定大小内存池
     auto test__multi_pool = [&]() {
         auto start = std::chrono::high_resolution_clock::now();
-        
         MemoryPoolAllocater allocator;
+        allocator.reset_global_state();
         std::vector<void*> ptrs;
         ptrs.reserve(NUM_ALLOCATIONS);
         
         for (int i = 0; i < NUM_ALLOCATIONS; ++i) {
-            ptrs.push_back(allocator.allocate(i));
+            void* ptr = allocator.allocate(i);
+            ptrs.push_back(ptr);
         }
         
         for (int i = 0; i < NUM_ALLOCATIONS; ++i)  {
@@ -192,5 +193,4 @@ TEST(MemoryPoolTest, Performance) {
 int main() {
     ::testing::InitGoogleTest();
     return RUN_ALL_TESTS();
-    return 0;
 }

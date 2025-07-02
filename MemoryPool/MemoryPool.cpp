@@ -2,10 +2,6 @@
 #include "MemoryPool.hpp"
 #include "logger.hpp"
 
-constexpr size_t align_of(size_t size, size_t allignment) {
-    return (size + allignment -1) & ~(allignment - 1);
-}
-
 LockFreeMultiSizePool::LockFreeMultiSizePool() {
     for (size_t i = 0; i < SIZE_CALSSES.size(); ++i) {
         new (&chunk_classes[i]) ChunkClass(SIZE_CALSSES[i]);
@@ -22,7 +18,7 @@ bool LockFreeMultiSizePool::fill_class_cache(size_t index) {
     // 已经有缓存，不需要填充
     if (class_cache.count > 0) return true;
 
-    constexpr int BATCH_SIZE = 8;
+    int BATCH_SIZE = std::size(class_cache.blocks) / 2;
 
     // 尝试从全局链表获取多个块
     FreeBlock* old_head = chunk_class.free_list.load(std::memory_order_acquire);
@@ -79,16 +75,18 @@ void* LockFreeMultiSizePool::allocate(size_t size) {
     auto& class_cache = thread_cache.caches[index];
     if (class_cache.count > 0) {
         FreeBlock* block = class_cache.blocks[--class_cache.count];
+        block->free_flag = false;
+        chunk_class.allocated_count.fetch_add(1, std::memory_order_relaxed);
+        return block->data(); // 返回数据指针
+    }
+    // 尝试批量获取块到本地缓存
+    if (fill_class_cache(index)) {
+        FreeBlock* block = class_cache.blocks[--class_cache.count];
+        block->free_flag = false;
         chunk_class.allocated_count.fetch_add(1, std::memory_order_relaxed);
         return block->data(); // 返回数据指针
     }
 
-    // 尝试批量获取块到本地缓存
-    if (fill_class_cache(index)) {
-        FreeBlock* block = class_cache.blocks[--class_cache.count];
-        chunk_class.allocated_count.fetch_add(1, std::memory_order_relaxed);
-        return block->data(); // 返回数据指针
-    }
     // 尝试从空闲列表获取
     while(old_block) {
         if(chunk_class.free_list.compare_exchange_weak(old_block, old_block->next.load(std::memory_order_relaxed))) {
@@ -111,6 +109,7 @@ void* LockFreeMultiSizePool::allocate(size_t size) {
 
     if(block) {
         chunk_class.allocated_count.fetch_add(1, std::memory_order_relaxed);
+        block->free_flag = false;
         return block->data(); // 返回数据指针
     }
     return nullptr;
@@ -119,6 +118,7 @@ void* LockFreeMultiSizePool::allocate(size_t size) {
 void LockFreeMultiSizePool::deallocate(void* ptr, size_t size) {
     if (ptr == nullptr) return;
 
+    thread_cache.pool_ptr = this; // 设置当前线程的内存池实例
     size_t align_size = align_of(size, ALIGNMENT);
     size_t index = get_size_class_index(align_size);
     if (index >= SIZE_CALSSES.size()) {
@@ -129,6 +129,12 @@ void LockFreeMultiSizePool::deallocate(void* ptr, size_t size) {
     ChunkClass& chunk_class = chunk_classes[index];
     FreeBlock* block_ptr = FreeBlock::from_data(ptr);  // 获取block
     
+    //LOG_INFO("free detected, ptr:{}, size:{}", ptr, size);
+    if (block_ptr->free_flag) {
+        LOG_ERROR("Double free detected, ptr:{}, size:{}", ptr, size);
+        return;
+    }
+    block_ptr->free_flag = true;
     // 尝试先放入本地缓存
     auto& class_cache = thread_cache.caches[index];
     if (class_cache.count < static_cast<int>(sizeof(class_cache.blocks) / sizeof(class_cache.blocks[0]))) {
@@ -189,28 +195,36 @@ size_t LockFreeMultiSizePool::get_size_class_index(size_t size) {
 
 void LockFreeMultiSizePool::allocate_chunk_for_size_class(size_t index) {
     if (index >= SIZE_CALSSES.size()) return; // 分配大对象
-    size_t block_size = SIZE_CALSSES[index];
-    size_t total_block_size = align_of(sizeof(FreeBlock) + block_size, ALIGNMENT);
-    size_t block_count = CHUNK_SIZE / total_block_size;
+    ChunkClass& chunk_class = chunk_classes[index];
+    size_t block_count = chunk_class.block_count;
 
     if (block_count == 0) block_count = 1;
 
-    size_t actual_chunk_size = total_block_size * block_count;
+    size_t actual_chunk_size = chunk_class.total_block_size * block_count;
     auto chunk = std::make_unique<std::byte[]>(actual_chunk_size); // 分配一个chunk
     std::byte* ptr = chunk.get();
 
+    FreeBlock* first_block = nullptr;
+    FreeBlock* prev_block = nullptr;
+    FreeBlock* block  = nullptr;
     // 将chunk 添加到对应大小的free_list 里面
-    ChunkClass& chunk_class = chunk_classes[index];
     for (size_t i = 0; i < block_count; ++i) {
         // 获取每个block
-        FreeBlock* block = new(ptr) FreeBlock(block_size);
-        ptr += total_block_size;
+        block = new(ptr) FreeBlock(chunk_class.block_size);
+        ptr += chunk_class.total_block_size;
+        if (i == 0) {
+            first_block = block;
+        }
 
-        // 将block 添加到free_list
-        FreeBlock* old_block = chunk_class.free_list.load(std::memory_order_relaxed);
-        do {
-            block->next.store(old_block, std::memory_order_relaxed);
-        } while(!chunk_class.free_list.compare_exchange_weak(old_block, block));
+        if (prev_block) {
+            prev_block->next.store(block, std::memory_order_relaxed);
+        }
+        prev_block = block;
     }
+    // 将block 添加到free_list
+    FreeBlock* old_block = chunk_class.free_list.load(std::memory_order_relaxed);
+    do {
+        block->next.store(old_block, std::memory_order_relaxed);
+    } while(!chunk_class.free_list.compare_exchange_weak(old_block, first_block,  std::memory_order_release, std::memory_order_relaxed));
     allocated_chunks.push(std::move(chunk)); // 将chunk 添加到allocated_chunks 管理
 }
